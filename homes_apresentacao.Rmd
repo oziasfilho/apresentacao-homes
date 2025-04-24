@@ -1,0 +1,1828 @@
+---
+title: "Análise de Homes dos Sites Abril"
+author: "Ozias Filho"
+institute: "Grupo Abril"
+date: "`r format(Sys.time(), '%B/%Y')`"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(plotly)
+library(readxl)
+library(data.table)
+library(googlesheets4)
+library(scales)
+library(highcharter)
+library(jsonlite)
+library(reactable)
+library(htmltools)
+options(scipen = 999)
+
+planilha_audiencia_home<-"https://docs.google.com/spreadsheets/d/1KOreRkkdSwFhdq4jyEMcJGmK_B_mwvoTOah_g665Ci8/edit?gid=435618982#gid=435618982"
+
+dados_home<-googlesheets4::read_sheet(planilha_audiencia_home,1) %>% janitor::clean_names()
+
+dados_geral<-googlesheets4::read_sheet(planilha_audiencia_home,2) %>% janitor::clean_names()
+
+home_interesse<- dados_home %>% 
+   mutate(data = case_when(
+     str_detect(mes, "jan. de") ~ str_replace(mes, "jan. de ", "01/01/"),
+     str_detect(mes, "fev. de") ~ str_replace(mes, "fev. de ", "01/02/"),
+     str_detect(mes, "mar. de") ~ str_replace(mes, "mar. de ", "01/03/"),
+     str_detect(mes, "abr. de") ~ str_replace(mes, "abr. de ", "01/04/"),
+     str_detect(mes, "mai. de") ~ str_replace(mes, "mai. de ", "01/05/"),
+     str_detect(mes, "jun. de") ~ str_replace(mes, "jun. de ", "01/06/"),
+     str_detect(mes, "jul. de") ~ str_replace(mes, "jul. de ", "01/07/"),
+     str_detect(mes, "ago. de") ~ str_replace(mes, "ago. de ", "01/08/"),
+     str_detect(mes, "set. de") ~ str_replace(mes, "set. de ", "01/09/"),
+     str_detect(mes, "out. de") ~ str_replace(mes, "out. de ", "01/10/"),
+     str_detect(mes, "nov. de") ~ str_replace(mes, "nov. de ", "01/11/"),
+     str_detect(mes, "dez. de") ~ str_replace(mes, "dez. de ", "01/12/"),
+     TRUE ~ NA_character_
+   )) %>%
+   mutate(data = dmy(data)) %>% filter(data>='2024-10-01'& data<='2025-03-01',hostname!='elastica.abril.com.br') %>% 
+   select(data,hostname,pageviews)
+
+names(home_interesse)<-c('data','hostname','pv_home')
+
+geral_interesse<- dados_geral %>% 
+   mutate(data = case_when(
+     str_detect(mes, "jan. de") ~ str_replace(mes, "jan. de ", "01/01/"),
+     str_detect(mes, "fev. de") ~ str_replace(mes, "fev. de ", "01/02/"),
+     str_detect(mes, "mar. de") ~ str_replace(mes, "mar. de ", "01/03/"),
+     str_detect(mes, "abr. de") ~ str_replace(mes, "abr. de ", "01/04/"),
+     str_detect(mes, "mai. de") ~ str_replace(mes, "mai. de ", "01/05/"),
+     str_detect(mes, "jun. de") ~ str_replace(mes, "jun. de ", "01/06/"),
+     str_detect(mes, "jul. de") ~ str_replace(mes, "jul. de ", "01/07/"),
+     str_detect(mes, "ago. de") ~ str_replace(mes, "ago. de ", "01/08/"),
+     str_detect(mes, "set. de") ~ str_replace(mes, "set. de ", "01/09/"),
+     str_detect(mes, "out. de") ~ str_replace(mes, "out. de ", "01/10/"),
+     str_detect(mes, "nov. de") ~ str_replace(mes, "nov. de ", "01/11/"),
+     str_detect(mes, "dez. de") ~ str_replace(mes, "dez. de ", "01/12/"),
+     TRUE ~ NA_character_
+   )) %>%
+   mutate(data = dmy(data)) %>% filter(data>='2024-10-01'& data<='2025-03-01',hostname!='elastica.abril.com.br') %>% 
+   select(data,hostname,pageviews)
+
+names(geral_interesse)<-c('data','hostname','pv_geral')
+
+planilha_hora<-"https://docs.google.com/spreadsheets/d/1vZx1EzT1Fpv0vlsxxh7Ae9DlU8IwJQl6CTUCcdlE0rA/edit?gid=899022543#gid=899022543"
+dados_hora<-googlesheets4::read_sheet(planilha_hora,1) %>% 
+  mutate(mes = as.Date(mes)) %>%
+          filter(mes>=as.Date('2024-10-01') & mes<=as.Date('2025-03-01'),!hostname %in% c('elastica.abril.com.br', 'especiallistas.abril.com.br')) 
+```
+## Resumo 
+- Período da Análise: (Outubro/2024 - Março/2025) (Geral-GA4)
+
+--
+
+- Objetivos:
+
+--
+
+- Tornar a Veja um Portal de Noticias;
+- Entender se a distribuição de conteúdo está adequada; 
+
+---
+class: inverse, center, middle
+
+# Pageviews das Homes
+
+---
+## Homes Abril
+```{r linhas-1,echo=F}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+# Obtemos todos os hostnames únicos
+hostnames <- unique(home_interesse$hostname)
+
+# Iniciamos o highchart
+hc <- highchart() %>%
+  hc_chart(type = "line") %>%
+  hc_title(text = "Pageviews de Home por hostname") %>%
+  hc_xAxis(type = "datetime") %>%
+  hc_yAxis(title = list(text = "PV Home"),min = 0) %>%
+  hc_tooltip(shared = TRUE)
+
+# Adiciona uma série por hostname, mas começa com `visible = FALSE`
+for (host in hostnames) {
+  df_host <- home_interesse %>% filter(hostname == host)
+
+  hc <- hc %>%
+    hc_add_series(data = list_parse2(
+                    df_host %>% 
+                      mutate(data = datetime_to_timestamp(data)) %>%
+                      select(data, pv_home)
+                  ),
+                  name = host,
+                  visible = FALSE)  # <-- aqui está o segredo!
+}
+
+# Pronto: gráfico começa em branco, o usuário ativa o que quiser na legenda
+# Envolver com HTML para centralizar
+htmltools::div(style = "display: flex; justify-content: center;", hc)
+```
+---
+
+## Homes Abril
+
+- As marcas _Veja_ e _Quatro Rodas_ apresentaram desempenho superior em comparação às demais durante o período analisado.;
+
+--
+
+- _Veja_ manteve um padrão estável de acesso à página inicial ao longo dos meses, com uma média de aproximadamente `r format(round(mean(home_interesse$pv_home[home_interesse$hostname == "veja.abril.com.br"], na.rm = TRUE), 2), big.mark = ".", decimal.mark = ",")` pageviews mensais na home.;
+
+--
+
+- _Quatro Rodas_ registrou uma trajetória de crescimento entre outubro e dezembro de 2024. Contudo, a partir de dezembro, observa-se uma tendência de queda nos acessos à página inicial.;
+
+--
+
+- _Capricho_ apresentou uma evolução consistente no número de pageviews na home, com crescimento contínuo de outubro de 2024 a fevereiro de 2025.;
+
+---
+class: inverse, center, middle
+
+# Audiência total da Home no período
+
+---
+
+```{r total_pvs, echo=FALSE, out.width="100%"}
+# Dados
+total <- home_interesse |> 
+  group_by(hostname) |> 
+  summarise(total_pvs = sum(pv_home, na.rm = TRUE)) |> 
+  ungroup() |> 
+  mutate(
+    perc = total_pvs / sum(total_pvs),
+    label = paste0(hostname, " (", percent(perc, accuracy = 0.1), ")")
+  ) |> 
+  arrange(-total_pvs)
+
+barras<-highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_title(text = "Pageviews da Home por Marca") %>% hc_subtitle(text = "Soma de todo o período analisado") %>%
+  hc_xAxis(
+    categories = total$label,
+    title = list(text = "Hostname"),
+    labels = list(style = list(fontSize = "12px"))
+  ) %>%
+  hc_yAxis(
+    title = list(text = "Total de Pageviews"),
+    labels = list(format = "{value:,.0f}")
+  ) %>%
+  hc_add_series(
+    name = "Pageviews",
+    data = total$total_pvs,
+    colorByPoint = TRUE,
+    showInLegend = FALSE
+  ) %>%
+  hc_tooltip(pointFormat = "<b>{point.y:,.0f} pageviews</b>") %>%
+  hc_plotOptions(bar = list(
+    dataLabels = list(enabled = TRUE, format = "{point.y:,.0f}")
+  ))
+
+htmltools::div(style = "display: flex; justify-content: center;", barras)
+
+```
+
+---
+class: inverse, center, middle
+
+# Percentual da Home em relação ao total do site
+
+---
+```{r percentual, echo=FALSE}
+# Junta os dados e calcula o percentual
+dados_perc <- left_join(home_interesse, geral_interesse, by = c("data", "hostname")) %>%
+  mutate(perc = (pv_home / pv_geral) * 100)
+
+# Lista de hostnames únicos
+hostnames <- unique(dados_perc$hostname)
+
+# Inicia o highchart com configuração base
+hc <- highchart() %>%
+  hc_chart(type = "line") %>%
+  hc_title(text = "Participação percentual do PV Home em relação ao PV Geral") %>%
+  hc_xAxis(
+    type = "datetime",
+    title = list(text = "Mês"),
+    dateTimeLabelFormats = list(month = "%m/%y")
+  ) %>%
+  hc_yAxis(
+    title = list(text = "Percentual (%)"),
+    labels = list(format = "{value}%"),
+    min = 0,max=100
+  ) %>%
+  hc_tooltip(
+    shared = TRUE,
+    headerFormat = "<b>{point.x:%m/%y}</b><br>",
+    pointFormat = "{series.name}: {point.y:.2f}%<br>"
+  ) %>%
+  hc_exporting(enabled = TRUE)
+
+# Adiciona uma série por hostname (todas invisíveis por padrão)
+for (host in hostnames) {
+  df_host <- dados_perc %>%
+    filter(hostname == host) %>%
+    mutate(data = datetime_to_timestamp(data))
+
+  hc <- hc %>%
+    hc_add_series(
+      data = list_parse2(df_host %>% select(data, y = perc)),
+      name = host,
+      visible = FALSE
+    )
+}
+
+# Centraliza o gráfico na página/slideshow
+htmltools::div(style = "display: flex; justify-content: center;", hc)
+```
+---
+## Percentual da Home em relação ao total do site
+
+
+- Apesar de uma leve redução percentual em março de 2025, _Capricho_ mantém uma tendência consistente de crescimento nos acessos à página inicial ao longo do período analisado.;
+
+--
+
+- _Veja Rio_ registrou um pico significativo de acessos à home em janeiro de 2025, destacando-se no comparativo mensal.(Eventos? Turismo?);
+
+--
+
+- A marca _Viagem e Turismo_ alcançou seu maior volume de acessos à página inicial em dezembro de 2024, respondendo por aproximadamente *70% da audiência total do site* no mês. Esse comportamento pode estar relacionado à atualização do layout implementada no período e ao aumento sazonal de interesse por viagens durante as férias de fim de ano.;
+
+--
+
+- _Veja Saúde_ apresentou seu menor desempenho proporcional em março de 2025, registrando o percentual mais baixo de audiência da home em todo o período avaliado.
+
+---
+class: inverse, center, middle
+
+# Origem dos Usuários nas Homes por Hora
+
+---
+## Bebê (bebe.abril.com.br)
+```{r bebe-hour, echo=FALSE}
+bebe_hora<- dados_hora %>% filter(hostname=='bebe.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+# Gera os gráficos mensais
+hc_list <- bebe_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_bebe <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_bebe
+)
+# hc_list <- bebe_hora %>%
+#   arrange(mes, hour) %>%
+#   group_split(mes_l) %>%
+#   lapply(function(data_mes) {
+#     series_list <- data_mes %>%
+#       group_split(channelGrouping) %>%
+#       lapply(function(grp) {
+#         list(
+#           name = unique(grp$channelGrouping),
+#           type = "line",
+#           data = lapply(1:nrow(grp), function(i) {
+#             list(x = grp$hour[i], y = grp$usuarios[i])
+#           })
+#         )
+#       })
+# 
+#     highchart() %>%
+#       hc_chart(type = "line") %>%
+#       hc_title(
+#         text = unique(data_mes$mes_l),
+#         style = list(fontSize = "13px", fontWeight = "bold")
+#       ) %>%
+#       hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+#       hc_yAxis(
+#         title = list(text = "Usuários"),
+#         min = 0
+#       ) %>%
+#       hc_tooltip(shared = TRUE) %>%
+#       hc_legend(
+#         layout = "vertical",
+#         align = "center",
+#         verticalAlign = "bottom",
+#         itemStyle = list(fontSize = "10px"),
+#         useHTML = TRUE,
+#         labelFormatter = JS(
+#           "function () {
+#              return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+#            }"
+#         )
+#       ) %>%
+#       hc_add_series_list(series_list)
+#   })
+# 
+# # Gera o grid para o slide (compacto)
+# grafico_bebe <- hw_grid(hc_list, ncol = 2)
+# 
+# # Exibe com scroll caso necessário (ideal para xaringan)
+# htmltools::div(
+#   style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+#   grafico_bebe
+# )
+
+```
+---
+
+## Boa Forma (boaforma.abril.com.br)
+```{r bf-hour, echo=FALSE}
+bf_hora<- dados_hora %>% filter(hostname=='boaforma.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- bf_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_bf <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_bf
+)
+
+```
+---
+## Bravo (bravo.abril.com.br)
+```{r bravo-hour, echo=FALSE}
+bravo_hora<- dados_hora %>% filter(hostname=='bravo.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- bravo_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+# Gera o grid para o slide (compacto)
+grafico_bravo <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_bravo
+)
+
+```
+---
+## Capricho (capricho.abril.com.br)
+```{r ch-hour, echo=FALSE}
+ch_hora<- dados_hora %>% filter(hostname=='capricho.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- ch_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+# Gera o grid para o slide (compacto)
+grafico_ch <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_ch
+)
+
+```
+---
+## Casa.com (casa.abril.com.br)
+```{r casa-hour, echo=FALSE}
+casa_hora<- dados_hora %>% filter(hostname=='casa.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- casa_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_casa <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_casa
+)
+
+```
+---
+## Claudia (claudia.abril.com.br)
+```{r claudia-hour, echo=FALSE}
+claudia_hora<- dados_hora %>% filter(hostname=='claudia.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- claudia_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+# Gera o grid para o slide (compacto)
+grafico_claudia <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_claudia
+)
+
+```
+---
+## Guia do Estudante (guiadoestudante.abril.com.br)
+```{r ge-hour, echo=FALSE}
+ge_hora<- dados_hora %>% filter(hostname=='guiadoestudante.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- ge_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+# Gera o grid para o slide (compacto)
+grafico_ge <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_ge
+)
+
+```
+---
+## Quatro Rodas (quatrorodas.abril.com.br)
+```{r qr-hour, echo=FALSE}
+qr_hora<- dados_hora %>% filter(hostname=='quatrorodas.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- qr_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+# Gera o grid para o slide (compacto)
+grafico_qr <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_qr
+)
+
+```
+---
+## Veja Saúde (saude.abril.com.br)
+```{r saude-hour, echo=FALSE}
+saude_hora<- dados_hora %>% filter(hostname=='saude.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- saude_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_saude <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_saude
+)
+
+```
+---
+## Super (super.abril.com.br)
+```{r super-hour, echo=FALSE}
+super_hora<- dados_hora %>% filter(hostname=='super.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- super_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_super <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_super
+)
+
+```
+---
+## Veja (veja.abril.com.br)
+```{r veja-hour, echo=FALSE}
+veja_hora<- dados_hora %>% filter(hostname=='veja.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- veja_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_veja <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_veja
+)
+
+```
+---
+## Veja Rio (vejario.abril.com.br)
+```{r vr-hour, echo=FALSE}
+vr_hora<- dados_hora %>% filter(hostname=='vejario.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- vr_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_vr <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_vr
+)
+
+```
+---
+## Veja SP (vejasp.abril.com.br)
+```{r vsp-hour, echo=FALSE}
+vsp_hora<- dados_hora %>% filter(hostname=='vejasp.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- vsp_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+# Gera o grid para o slide (compacto)
+grafico_vsp <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_vsp
+)
+
+```
+---
+## Viagem e Turismo (viagemeturismo.abril.com.br)
+```{r vt-hour, echo=FALSE}
+vt_hora<- dados_hora %>% filter(hostname=='viagemeturismo.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- vt_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_vt <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_vt
+)
+
+```
+---
+## Você RH (vocerh.abril.com.br)
+```{r vcrh-hour, echo=FALSE}
+vcrh_hora<- dados_hora %>% filter(hostname=='vocerh.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- vcrh_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_vcrh <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_vcrh
+)
+
+```
+---
+## Você S/A (vocesa.abril.com.br)
+```{r vcsa-hour, echo=FALSE}
+vcsa_hora<- dados_hora %>% filter(hostname=='vocesa.abril.com.br') %>% mutate(
+      mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)]))
+    )
+
+#y_max <- max(bf_hora$usuarios, na.rm = TRUE)
+
+
+# Gera os gráficos mensais
+# Gera os gráficos mensais
+hc_list <- vcsa_hora %>%
+  arrange(mes, hour) %>%
+  group_split(mes_l) %>%
+  lapply(function(data_mes) {
+    
+    # Ordena os canais por total de usuários
+    channel_order <- data_mes %>%
+      group_by(channelGrouping) %>%
+      summarise(total_usuarios = sum(usuarios, na.rm = TRUE)) %>%
+      arrange(desc(total_usuarios)) %>%
+      pull(channelGrouping)
+    
+    # Cria a lista de séries seguindo a ordem
+    series_list <- channel_order %>%
+      lapply(function(canal) {
+        grp <- data_mes %>% filter(channelGrouping == canal)
+        
+        list(
+          name = canal,
+          type = "line",
+          data = lapply(1:nrow(grp), function(i) {
+            list(x = grp$hour[i], y = grp$usuarios[i])
+          })
+        )
+      })
+    
+    highchart() %>%
+      hc_chart(type = "line") %>%
+      hc_title(
+        text = unique(data_mes$mes_l),
+        style = list(fontSize = "13px", fontWeight = "bold")
+      ) %>%
+      hc_xAxis(title = list(text = "Hora"), categories = 0:23) %>%
+      hc_yAxis(
+        title = list(text = "Usuários"),
+        min = 0
+      ) %>%
+      hc_tooltip(shared = TRUE) %>%
+      hc_legend(
+        layout = "vertical",
+        align = "center",
+        verticalAlign = "bottom",
+        itemStyle = list(fontSize = "10px"),
+        useHTML = TRUE,
+        labelFormatter = JS(
+          "function () {
+             return '<div style=\"column-count: 2; width: 280px;\">' + this.name + '</div>';
+           }"
+        )
+      ) %>%
+      hc_add_series_list(series_list)
+  })
+
+# Gera o grid para o slide (compacto)
+grafico_vcsa <- hw_grid(hc_list, ncol = 2)
+
+# Exibe com scroll caso necessário (ideal para xaringan)
+htmltools::div(
+  style = "max-height: calc(100vh - 40px); overflow-y: auto;",
+  grafico_vcsa
+)
+
+```
+---
+## Insights
+
+- Em todos os meses analisados, _Veja_ manteve a busca orgânica como principal fonte de tráfego para a página inicial, demonstrando forte presença e relevância nos mecanismos de busca.;
+
+--
+
+- O canal *Cross-Network* se consolidou como a principal fonte de tráfego para a maioria das marcas.;
+
+--
+
+- [Cross-network](https://reportei.com/o-que-e-cross-network-no-ga4/) é um canal que agrupa o tráfego que chega ao seu site ou aplicativo por meio de anúncios exibidos em múltiplas redes do Google. 
+
+--
+
+- Superinteressante também se destaca por apresentar um comportamento semelhante ao de Veja, com crescimento relevante sustentado principalmente por tráfego orgânico.;
+
+---
+class: inverse, center, middle
+
+# Audiência das Homes por Dispositivo
+
+---
+```{r bebe-dispositivo, echo=FALSE}
+p_dispositivos<-"https://docs.google.com/spreadsheets/d/1bDHPKLc-8fgNQiw413D9F4Na4FBO7F0YdyOzd4P9CAo/edit?gid=216085209#gid=216085209"
+
+d_dispositivos<- googlesheets4::read_sheet(p_dispositivos) %>% janitor::clean_names() %>% 
+  mutate(mes_date = as.Date(mes),
+      mes_l = format(mes_date, "%b/%Y"),
+      mes_l = factor(mes_l, levels = unique(mes_l[order(mes_date)])))
+
+hosts <- unique(d_dispositivos$nome_do_host)
+
+# função para gerar o dataset da marca
+cria_dataset <- function(host) {
+  d_dispositivos %>%
+    filter(nome_do_host == host) %>%
+    group_by(mes_l, categoria_de_dispositivo) %>%
+    summarise(
+      pv_total_site = sum(visualizacoes),
+      pv_total_home = sum(visualizacoes[tipo_de_pagina == "Home-Principal"]),
+      .groups = "drop"
+    ) %>%
+    group_by(mes_l) %>%
+    mutate(
+      perc_home = pv_total_home / sum(pv_total_home),
+      perc_total = pv_total_site / sum(pv_total_site)
+    )
+}
+
+# aplica a função a todos os hosts
+dispositivos_por_marca <- setNames(lapply(hosts, cria_dataset), hosts)
+
+adiciona_totais_por_mes <- function(dados) {
+  totais <- dados %>%
+    group_by(mes_l) %>%
+    summarise(
+      categoria_de_dispositivo = "Total",
+      pv_total_site = sum(pv_total_site, na.rm = TRUE),
+      pv_total_home = sum(pv_total_home, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      perc_home = 1,  # Para o total, será 100%
+      perc_total = 1,  # Para o total, será 100%
+      is_total = TRUE
+    )
+  
+  dados <- dados %>%
+    mutate(is_total = FALSE)
+  
+  bind_rows(
+    dados,
+    totais
+  ) %>%
+    arrange(mes_l, is_total, desc(categoria_de_dispositivo))  # Total vai para o final de cada mês
+}
+
+tabela_marca <- function(dados, titulo) {
+  dados <- adiciona_totais_por_mes(dados)
+
+  tagList(
+    h4(titulo, style = "margin-top: 10px; font-weight: bold; font-family: sans-serif;"),
+    div(
+      style = "max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px;
+               box-shadow: 0 2px 8px rgba(0,0,0,0.05); padding: 10px; margin-bottom: 40px;",
+      reactable::reactable(
+        data = dados,
+        groupBy = "mes_l",
+        columns = list(
+          mes_l = reactable::colDef(name = "Mês"),
+          categoria_de_dispositivo = reactable::colDef(
+            name = "Dispositivo",
+            cell = function(value, index) {
+              if (dados$is_total[index]) {
+                htmltools::tags$b(style = "color: black;", value)
+              } else {
+                value
+              }
+            }
+          ),
+          
+          pv_total_site = reactable::colDef(
+            name = "PV Site",
+            format = reactable::colFormat(separators = TRUE),
+            align = "right",
+            cell = function(value, index) {
+              if (dados$is_total[index]) {
+                htmltools::tags$b(style = "color: black;", format(value, big.mark = "."))
+              } else {
+                format(value, big.mark = ".")
+              }
+            }
+          ),
+          
+          perc_total = reactable::colDef(
+            name = "% Site",
+            format = reactable::colFormat(percent = TRUE, digits = 1),
+            align = "center",
+            cell = function(value, index) {
+              if (dados$is_total[index]) {
+                htmltools::tags$b(style = "color: black;", scales::percent(value, accuracy = 0.1))
+              } else {
+                cor <- if (value > 0.5) "#2E7D32" else "#B71C1C"
+                htmltools::div(style = paste0("color: ", cor, "; font-weight: bold;"),
+                               scales::percent(value, accuracy = 0.1))
+              }
+            }
+          ),
+          
+          pv_total_home = reactable::colDef(
+            name = "PV Home",
+            format = reactable::colFormat(separators = TRUE),
+            align = "right",
+            cell = function(value, index) {
+              if (dados$is_total[index]) {
+                htmltools::tags$b(style = "color: black;", format(value, big.mark = "."))
+              } else {
+                format(value, big.mark = ".")
+              }
+            }
+          ),
+          
+          perc_home = reactable::colDef(
+            name = "% Home",
+            format = reactable::colFormat(percent = TRUE, digits = 1),
+            align = "center",
+            cell = function(value, index) {
+              if (dados$is_total[index]) {
+                htmltools::tags$b(style = "color: black;", scales::percent(value, accuracy = 0.1))
+              } else {
+                cor <- if (value > 0.5) "#2E7D32" else "#B71C1C"
+                htmltools::div(style = paste0("color: ", cor, "; font-weight: bold;"),
+                               scales::percent(value, accuracy = 0.1))
+              }
+            }
+          ),
+          # Não exibir a coluna is_total
+          is_total = reactable::colDef(show = FALSE)
+        ),
+        striped = TRUE,
+        highlight = TRUE,
+        compact = TRUE,
+        theme = reactable::reactableTheme(
+          style = list(fontSize = "13px", fontFamily = "Helvetica, sans-serif"),
+          headerStyle = list(background = "#f4f4f4", fontWeight = "bold")
+        )
+      )
+    )
+  )
+}
+# tabela_marca <- function(dados, titulo) {
+#    dados <- adiciona_totais_por_mes(dados)  # ⬅️ insere a linha "Total"
+#   tagList(
+#     h4(titulo, style = "margin-top: 10px; font-weight: bold; font-family: sans-serif;"),
+#     div(
+#       style = "max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px;
+#                box-shadow: 0 2px 8px rgba(0,0,0,0.05); padding: 10px; margin-bottom: 40px;",
+#       reactable(
+#         data = dados,
+#         groupBy = "mes_l",
+#         #defaultExpanded = TRUE,
+#         columns = list(
+#           mes_l = colDef(name = "Mês"),
+#           categoria_de_dispositivo = colDef(name = "Dispositivo"),
+#           pv_total_site = colDef(name = "PV Site", format = colFormat(separators = TRUE), align = "right"),
+#           pv_total_home = colDef(name = "PV Home", format = colFormat(separators = TRUE), align = "right"),
+#           perc_home = colDef(
+#             name = "% Home",
+#             format = colFormat(percent = TRUE, digits = 1),
+#             align = "center",
+#             style = function(value) {
+#               color <- ifelse(value > 0.5, "#2E7D32", "#B71C1C")
+#               list(color = color, fontWeight = "bold")
+#             }
+#           ),
+#           perc_total = colDef(
+#             name = "% Total",
+#             format = colFormat(percent = TRUE, digits = 1),
+#             align = "center",
+#             style = function(value) {
+#               color <- ifelse(value > 0.5, "#2E7D32", "#B71C1C")
+#               list(color = color, fontWeight = "bold")
+#             }
+#           )
+#         ),
+#         striped = TRUE,
+#         highlight = TRUE,
+#         compact = TRUE,
+#         theme = reactableTheme(
+#           style = list(fontSize = "13px", fontFamily = "Helvetica, sans-serif"),
+#           headerStyle = list(background = "#f4f4f4", fontWeight = "bold")
+#         )
+#       )
+#     )
+#   )
+# }
+
+# Renderizando duas tabelas (exemplo com 'bebe' e 'claudia')
+htmltools::tagList(
+  tabela_marca(dispositivos_por_marca[["bebe.abril.com.br"]], "Bebê"),
+  tabela_marca(dispositivos_por_marca[["boaforma.abril.com.br"]], "Boa Forma")
+)
+```
+---
+```{r bravo-dispositivo, echo=FALSE}
+htmltools::tagList(
+  tabela_marca(dispositivos_por_marca[["bravo.abril.com.br"]], "Bravo"),
+  tabela_marca(dispositivos_por_marca[["capricho.abril.com.br"]], "Capricho")
+)
+
+```
+---
+```{r casa-dispositivo, echo=FALSE}
+htmltools::tagList(
+  tabela_marca(dispositivos_por_marca[["casa.abril.com.br"]], "Casa"),
+  tabela_marca(dispositivos_por_marca[["claudia.abril.com.br"]], "Claudia")
+)
+
+```
+---
+```{r ge-dispositivo, echo=FALSE}
+htmltools::tagList(
+  tabela_marca(dispositivos_por_marca[["guiadoestudante.abril.com.br"]], "Guia do Estudante"),
+  tabela_marca(dispositivos_por_marca[["quatrorodas.abril.com.br"]], "Quatro Rodas")
+)
+```
+---
+```{r saude-dispositivo, echo=FALSE}
+htmltools::tagList(
+  tabela_marca(dispositivos_por_marca[["saude.abril.com.br"]], "Veja Saúde"),
+  tabela_marca(dispositivos_por_marca[["super.abril.com.br"]], "Super")
+)
+```
+
+---
+```{r veja-dispositivo, echo=FALSE}
+htmltools::tagList(
+  tabela_marca(dispositivos_por_marca[["veja.abril.com.br"]], "Veja"),
+  tabela_marca(dispositivos_por_marca[["vejario.abril.com.br"]], "Veja Rio")
+)
+```
+---
+```{r vejasp-dispositivo, echo=FALSE}
+htmltools::tagList(
+  tabela_marca(dispositivos_por_marca[["vejasp.abril.com.br"]], "Veja SP"),
+  tabela_marca(dispositivos_por_marca[["viagemeturismo.abril.com.br"]], "Viagem e Turismo")
+)
+```
+---
+```{r vcs-dispositivo, echo=FALSE}
+htmltools::tagList(
+  tabela_marca(dispositivos_por_marca[["vocerh.abril.com.br"]], "Você RH"),
+  tabela_marca(dispositivos_por_marca[["vocesa.abril.com.br"]], "Você S/A")
+)
+```
+---
+##Insights
+
+- As marcas seguem um padrão bem estabelecido, destaque do dispositivo _mobile_ tanto na *Home* como no *restante do site*.;
+
+--
+
+- As únicas excessões são *Super* e *Veja* em que na Home se destacam no dispositivo _desktop_ e no total do site o dispositivo _mobile_.
